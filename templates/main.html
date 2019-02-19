@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Main page</title>
+</head>
+<body>
+<a href="{{ url_for('extlist') }}">Получить список добавочных номеров</a>
+
+{% for extension in extension_list %}
+    <p>{{ extension }}</p>
+{% endfor %}
+
+<br>
+<br>
+
+<a href="{{ url_for('randomext', extension_list=extension_list) }}">Получить случайный добавочный из списка</a>
+<p>{{ random_ext }}</p>
+
+</body>
+</html>
