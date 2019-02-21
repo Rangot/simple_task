@@ -1,53 +1,93 @@
-from flask import Flask, redirect, url_for, render_template
-
+import os
 import requests
 import random
+import urllib.parse
 
+from flask import Flask, redirect, url_for, render_template, request, session
+from functools import wraps
+from time import time
 
 app = Flask(__name__)
+app.secret_key = os.urandom(24)
 app.debug = True
 
 API_HOST = "https://apiproxy.telphin.ru"
 APP_ID = "ca171d22eb2440338a3a5ea8b86182bf"
 APP_SECRET = "f38d0e46e90949d38bbaab41f0ae8b66"
-REDIRECT_URI = "http://simplesapp:5055/login/authorized"
+REDIRECT_URI = "http://localhost:5055/login/authorized"
 
-headers = {'Content-type': 'application/json',
-           'Authorization': ''}
+headers = {'Content-type': 'application/json'}
 
 body = {
-    'grant_type': 'client_credentials',
     'redirect_uri': REDIRECT_URI,
     'client_id': APP_ID,
     'client_secret': APP_SECRET,
 }
 
 
-@app.route('/', methods=['GET'])
-def index():
-    return render_template('index.html')
+def requires_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        data = headers.get("Authorization")
+        if not data:
+            return authorize()
+        else:
+            token = session.get('token')
+            if time() > float(token.get('expires_at')):
+                login()
+        return f(*args, **kwargs)
+    return decorated
 
 
-@app.route('/login', methods=['GET'])
+@app.route('/authorize', methods=['GET'])
+def authorize():
+    request_url = "{host}/oauth/authorize".format(host=API_HOST)
+    query = {
+        'response_type': 'code',
+        'redirect_uri': REDIRECT_URI,
+        'client_id': APP_ID,
+        'scope': 'all'
+    }
+    enc_query = urllib.parse.urlencode(query)
+    url = request_url + '?' + enc_query
+    return redirect(url)
+
+
+@app.route('/login/authorized', methods=['GET'])
 def login():
     request_url = "{host}/oauth/token".format(host=API_HOST)
+    token = session.get('token')
+    # new token
+    if not token:
+        code = request.args.get('code')
+        body.update({'grant_type': 'authorization_code', 'code': code})
+    # refresh token
+    else:
+        body.update({'grant_type': 'refresh_token', 'refresh_token': token.get('refresh_token')})
     response = requests.post(request_url, data=body)
     if response.status_code == 200:
-        access_token = response.json()['access_token']
+        session['token'] = {
+            'access_token': response.json()['access_token'],
+            'refresh_token': response.json()['refresh_token'],
+            'expires_at': response.json()['expires_in'] + time()
+        }
+        token = session.get('token')
+        headers.update({'Authorization': 'Bearer {access_token}'.format(access_token=token.get('access_token'))})
     elif response.status_code == 401:
-        raise requests.HTTPError('Ошибка авторизации: {error}'.format(error=response.json()['error']))
+        raise requests.HTTPError('Ошибка авторизации')
     else:
         raise requests.HTTPError('Неизвестная ошибка')
-    headers.update({'Authorization': 'Bearer {access_token}'.format(access_token=access_token)})
     return redirect(url_for('main'))
 
 
-@app.route('/main', methods=['GET'])
+@app.route('/', methods=['GET'])
+@requires_auth
 def main():
     return render_template('main.html')
 
 
 @app.route('/extlist/', methods=['GET'])
+@requires_auth
 def extlist():
     request_url = "{host}/api/ver1.0/client/@me/extension/".format(host=API_HOST)
     response = requests.get(request_url, headers=headers)
@@ -56,6 +96,7 @@ def extlist():
 
 
 @app.route('/randomext/', methods=['GET'])
+@requires_auth
 def randomext():
     request_url = "{host}/api/ver1.0/client/@me/extension/".format(host=API_HOST)
     response = requests.get(request_url, headers=headers)
@@ -65,4 +106,4 @@ def randomext():
 
 
 if __name__ == '__main__':
-    app.run()
+    app.run(port='5055')
