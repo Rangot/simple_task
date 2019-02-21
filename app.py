@@ -34,7 +34,7 @@ def requires_auth(f):
         else:
             token = session.get('token')
             if time() > float(token.get('expires_at')):
-                login()
+                return login()
         return f(*args, **kwargs)
     return decorated
 
